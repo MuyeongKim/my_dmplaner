@@ -73,8 +73,13 @@ export function buildMonthGrid(monthDate: Date): DayCell[] {
   const first = startOfMonth(monthDate);
   const startOffset = sundayStartIndex(first.getDay());
   const gridStart = addDays(first, -startOffset);
+  const daysInMonth = endOfMonth(monthDate).getDate();
+  const totalCells = Math.max(
+    35,
+    Math.ceil((startOffset + daysInMonth) / 7) * 7,
+  );
 
-  return Array.from({ length: 42 }, (_, index) => {
+  return Array.from({ length: totalCells }, (_, index) => {
     const date = addDays(gridStart, index);
     return {
       key: toDateKey(date),
