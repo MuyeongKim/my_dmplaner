@@ -1,36 +1,34 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 달무 플래너
 
-## Getting Started
+근무 패턴/일정을 월간 캘린더로 관리하는 Next.js PWA입니다.
 
-First, run the development server:
+## 실행
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+corepack pnpm install
+corepack pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 저장소 동작 방식
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`가 설정되어 있으면 Supabase를 사용합니다.
+- 환경변수가 없으면 기존처럼 IndexedDB(로컬 브라우저 저장소)를 사용합니다.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Supabase 설정
 
-## Learn More
+1. Supabase 프로젝트 생성
+2. SQL Editor에서 [`supabase/schema.sql`](supabase/schema.sql) 실행
+3. `.env.local` 생성 후 아래 값 입력
 
-To learn more about Next.js, take a look at the following resources:
+```env
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+4. 앱 재실행
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 참고
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- 월간 캘린더는 `일, 월, 화, 수, 목, 금, 토` 순서입니다.
+- 토요일은 파란색, 일요일/임시공휴일은 빨간색으로 표시됩니다.
+- 임시공휴일은 설정 탭에서 `YYYY-MM-DD` 형식으로 직접 추가할 수 있습니다.

@@ -13,6 +13,7 @@ import {
   getPatternForDate,
   toDateKey,
 } from "@/lib/calendar";
+import { loadHolidayMap, normalizeHolidayInput, toHolidayMap } from "@/lib/holidays";
 import {
   deleteException,
   deleteTrashItem,
@@ -39,7 +40,7 @@ import {
 
 const EVENT_COLORS = ["#2b6cb0", "#0f766e", "#c2410c", "#7e22ce", "#be185d", "#166534"];
 const PATTERN_COLORS = ["#4c6e3b", "#4f86c6", "#ea580c", "#7d8597"];
-const WEEKDAY = ["월", "화", "수", "목", "금", "토", "일"];
+const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
 
 type ScheduleForm = {
   id?: string;
@@ -195,6 +196,9 @@ export default function HomePage() {
 
   const [memoDraft, setMemoDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [holidayMap, setHolidayMap] = useState<Record<string, string>>({});
+  const [tempHolidayDates, setTempHolidayDates] = useState<string[]>([]);
+  const [tempHolidayInput, setTempHolidayInput] = useState("");
 
   const refresh = useCallback(async (spin = false) => {
     if (spin) setLoading(true);
@@ -227,6 +231,15 @@ export default function HomePage() {
         .filter((item) => item.key.startsWith("memo:"))
         .map((item) => [item.key.replace("memo:", ""), String(item.value ?? "")]);
       setMemos(Object.fromEntries(memoEntries));
+
+      const savedTempHolidayRaw = settingsMap.get("holiday:tempDates");
+      const savedTempHolidayDates = Array.isArray(savedTempHolidayRaw)
+        ? savedTempHolidayRaw.filter(isDateKey)
+        : typeof savedTempHolidayRaw === "string"
+          ? normalizeHolidayInput(savedTempHolidayRaw)
+          : [];
+      setTempHolidayDates(savedTempHolidayDates);
+      setTempHolidayInput(savedTempHolidayDates.join(", "));
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "데이터를 불러오지 못했습니다.");
@@ -293,6 +306,7 @@ export default function HomePage() {
 
   const monthCells = useMemo(() => buildMonthGrid(currentMonth), [currentMonth]);
   const weekDates = useMemo(() => buildWeekRange(selectedDate), [selectedDate]);
+  const holidayDateKeys = useMemo(() => new Set(Object.keys(holidayMap)), [holidayMap]);
 
   const threeDayDates = useMemo(() => {
     const base = fromDateKey(selectedDate);
@@ -329,6 +343,32 @@ export default function HomePage() {
       }),
     ).slice(0, 80);
   }, [searchQuery, schedules]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadHolidays = async () => {
+      try {
+        const monthHolidayMap = await loadHolidayMap(monthCells.map((cell) => cell.date));
+        const merged = {
+          ...monthHolidayMap,
+          ...toHolidayMap(tempHolidayDates),
+        };
+        if (mounted) {
+          setHolidayMap(merged);
+        }
+      } catch {
+        if (mounted) {
+          setHolidayMap(toHolidayMap(tempHolidayDates));
+        }
+      }
+    };
+
+    loadHolidays();
+    return () => {
+      mounted = false;
+    };
+  }, [monthCells, tempHolidayDates]);
 
   const savePatternConfig = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -498,6 +538,18 @@ export default function HomePage() {
   const saveMemo = async () => {
     await setSetting(`memo:${selectedDate}`, memoDraft);
     setMemos((prev) => ({ ...prev, [selectedDate]: memoDraft }));
+  };
+
+  const saveTempHolidays = async () => {
+    const normalized = normalizeHolidayInput(tempHolidayInput);
+    if (tempHolidayInput.trim().length > 0 && normalized.length === 0) {
+      setError("임시공휴일 형식은 YYYY-MM-DD, YYYY-MM-DD 형태로 입력해주세요.");
+      return;
+    }
+    await setSetting("holiday:tempDates", normalized);
+    setTempHolidayDates(normalized);
+    setTempHolidayInput(normalized.join(", "));
+    setError(null);
   };
 
   const moveCycle = (index: number, direction: -1 | 1) => {
@@ -762,7 +814,7 @@ export default function HomePage() {
             </div>
             <div className="weekday-row">
               {WEEKDAY.map((label, idx) => (
-                <span key={label} className={idx === 5 ? "sat" : idx === 6 ? "sun" : ""}>{label}</span>
+                <span key={label} className={idx === 0 ? "sun" : idx === 6 ? "sat" : ""}>{label}</span>
               ))}
             </div>
             <div className="month-grid">
@@ -773,21 +825,24 @@ export default function HomePage() {
                 const isSelected = dateKey === selectedDate;
                 const isToday = dateKey === todayKey;
                 const dayOfWeek = cell.date.getDay();
+                const isHoliday = holidayDateKeys.has(dateKey);
 
                 return (
                   <button
                     key={cell.key}
                     type="button"
-                    className={`day-cell ${cell.inCurrentMonth ? "" : "muted"} ${isSelected ? "selected" : ""} ${isToday ? "today" : ""} ${dayOfWeek === 6 ? "sat" : ""} ${dayOfWeek === 0 ? "sun" : ""}`}
+                    className={`day-cell ${cell.inCurrentMonth ? "" : "muted"} ${isSelected ? "selected" : ""} ${isToday ? "today" : ""} ${dayOfWeek === 6 ? "sat" : ""} ${dayOfWeek === 0 ? "sun" : ""} ${isHoliday ? "holiday" : ""}`}
                     onClick={() => setSelectedDate(dateKey)}
                     onDoubleClick={() => openAddSchedule(dateKey)}
                   >
-                    <span className="day-number">{cell.date.getDate()}</span>
-                    {dayPattern && (
-                      <span className="badge pattern" style={{ borderColor: dayPattern.color, color: dayPattern.color }}>
-                        {dayPattern.label}
-                      </span>
-                    )}
+                    <div className="day-head">
+                      <span className="day-number">{cell.date.getDate()}</span>
+                      {dayPattern && (
+                        <span className="badge pattern day-pattern-inline" style={{ borderColor: dayPattern.color, color: dayPattern.color }}>
+                          {dayPattern.label}
+                        </span>
+                      )}
+                    </div>
                     {daySchedules.slice(0, 2).map((item) => (
                       <span key={item.id} className="badge schedule" style={{ backgroundColor: item.color }}>
                         {item.title}
@@ -873,6 +928,20 @@ export default function HomePage() {
                 <button type="button" onClick={sendTestNotification}>테스트 알림</button>
               </div>
             </div>
+
+            <h3>임시공휴일</h3>
+            <label className="field">
+              <span>날짜(YYYY-MM-DD, 쉼표 구분)</span>
+              <input
+                value={tempHolidayInput}
+                onChange={(event) => setTempHolidayInput(event.target.value)}
+                placeholder="2026-01-27, 2026-10-02"
+              />
+            </label>
+            <div className="inline-actions">
+              <button type="button" onClick={saveTempHolidays}>임시공휴일 저장</button>
+            </div>
+            <p className="empty">일요일과 임시공휴일은 빨간색, 토요일은 파란색으로 표시됩니다.</p>
 
             <h3>휴지통 (7일 보관)</h3>
             {trash.length === 0 && <p className="empty">휴지통이 비어있습니다.</p>}
@@ -1123,7 +1192,6 @@ export default function HomePage() {
     </main>
   );
 }
-
 
 
 

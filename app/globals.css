@@ -349,11 +349,11 @@ textarea {
 }
 
 .weekday-row .sat {
-  color: #936e1f;
+  color: #2563eb;
 }
 
 .weekday-row .sun {
-  color: #4276bb;
+  color: #dc2626;
 }
 
 .month-grid {
@@ -399,11 +399,27 @@ textarea {
 }
 
 .day-cell.sat .day-number {
-  color: #a47a22;
+  color: #2563eb;
 }
 
 .day-cell.sun .day-number {
-  color: #4f7ec1;
+  color: #dc2626;
+}
+
+.day-cell.holiday .day-number {
+  color: #dc2626;
+}
+
+.day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.day-pattern-inline {
+  max-width: 70%;
+  text-align: right;
 }
 
 .day-number {
@@ -786,4 +802,3 @@ textarea {
   font-size: 0.68rem;
   color: #5f6c59;
 }
-

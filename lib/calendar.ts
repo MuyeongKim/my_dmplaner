@@ -65,13 +65,13 @@ export function isSameDate(a: Date, b: Date): boolean {
   return toDateKey(a) === toDateKey(b);
 }
 
-function mondayStartIndex(day: number): number {
-  return (day + 6) % 7;
+function sundayStartIndex(day: number): number {
+  return day;
 }
 
 export function buildMonthGrid(monthDate: Date): DayCell[] {
   const first = startOfMonth(monthDate);
-  const startOffset = mondayStartIndex(first.getDay());
+  const startOffset = sundayStartIndex(first.getDay());
   const gridStart = addDays(first, -startOffset);
 
   return Array.from({ length: 42 }, (_, index) => {
@@ -86,10 +86,10 @@ export function buildMonthGrid(monthDate: Date): DayCell[] {
 
 export function buildWeekRange(baseDateKey: string): Date[] {
   const date = fromDateKey(baseDateKey);
-  const offset = mondayStartIndex(date.getDay());
-  const monday = addDays(date, -offset);
+  const offset = sundayStartIndex(date.getDay());
+  const sunday = addDays(date, -offset);
 
-  return Array.from({ length: 7 }, (_, index) => addDays(monday, index));
+  return Array.from({ length: 7 }, (_, index) => addDays(sunday, index));
 }
 
 export function getPatternForDate(

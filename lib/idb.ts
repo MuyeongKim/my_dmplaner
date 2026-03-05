@@ -1,3 +1,4 @@
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import {
   BackupPayload,
   PatternException,
@@ -9,10 +10,19 @@ import {
 
 const DB_NAME = "easy-planner-db";
 const DB_VERSION = 1;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 type StoreName =
   | "workPatterns"
   | "patternExceptions"
+  | "schedules"
+  | "trash"
+  | "settings";
+
+type SupabaseTableName =
+  | "work_patterns"
+  | "pattern_exceptions"
   | "schedules"
   | "trash"
   | "settings";
@@ -23,6 +33,22 @@ interface PlannerDataSnapshot {
   schedules: Schedule[];
   trash: TrashItem[];
   settings: SettingRecord[];
+}
+
+let supabaseClient: SupabaseClient | null = null;
+
+function isSupabaseEnabled(): boolean {
+  return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+}
+
+function getSupabaseClient(): SupabaseClient {
+  if (!isSupabaseEnabled()) {
+    throw new Error("Supabase 설정이 없습니다.");
+  }
+  if (!supabaseClient) {
+    supabaseClient = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!);
+  }
+  return supabaseClient;
 }
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
@@ -125,7 +151,67 @@ async function bulkPut<T>(storeName: StoreName, values: T[]): Promise<void> {
   db.close();
 }
 
+async function supabaseSelectAll<T>(table: SupabaseTableName): Promise<T[]> {
+  const client = getSupabaseClient();
+  const { data, error } = await client.from(table).select("*");
+  if (error) {
+    throw new Error(error.message);
+  }
+  return (data ?? []) as T[];
+}
+
+async function supabaseUpsert(
+  table: SupabaseTableName,
+  value: unknown,
+  onConflict: string,
+): Promise<void> {
+  const client = getSupabaseClient();
+  const { error } = await client.from(table).upsert(value, { onConflict });
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+async function supabaseDelete(
+  table: SupabaseTableName,
+  column: string,
+  value: string,
+): Promise<void> {
+  const client = getSupabaseClient();
+  const { error } = await client.from(table).delete().eq(column, value);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+async function supabaseClear(table: SupabaseTableName, keyColumn: string): Promise<void> {
+  const client = getSupabaseClient();
+  const { error } = await client.from(table).delete().not(keyColumn, "is", null);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
 export async function loadSnapshot(): Promise<PlannerDataSnapshot> {
+  if (isSupabaseEnabled()) {
+    const [workPatterns, patternExceptions, schedules, trash, settings] =
+      await Promise.all([
+        supabaseSelectAll<WorkPattern>("work_patterns"),
+        supabaseSelectAll<PatternException>("pattern_exceptions"),
+        supabaseSelectAll<Schedule>("schedules"),
+        supabaseSelectAll<TrashItem>("trash"),
+        supabaseSelectAll<SettingRecord>("settings"),
+      ]);
+
+    return {
+      workPatterns,
+      patternExceptions,
+      schedules,
+      trash,
+      settings,
+    };
+  }
+
   const [workPatterns, patternExceptions, schedules, trash, settings] =
     await Promise.all([
       getAll<WorkPattern>("workPatterns"),
@@ -145,22 +231,74 @@ export async function loadSnapshot(): Promise<PlannerDataSnapshot> {
 }
 
 export async function saveWorkPattern(pattern: WorkPattern): Promise<void> {
+  if (isSupabaseEnabled()) {
+    await supabaseUpsert("work_patterns", pattern, "id");
+    return;
+  }
   await put("workPatterns", pattern);
 }
 
 export async function saveException(item: PatternException): Promise<void> {
+  if (isSupabaseEnabled()) {
+    await supabaseUpsert("pattern_exceptions", item, "id");
+    return;
+  }
   await put("patternExceptions", item);
 }
 
 export async function deleteException(exceptionId: string): Promise<void> {
+  if (isSupabaseEnabled()) {
+    await supabaseDelete("pattern_exceptions", "id", exceptionId);
+    return;
+  }
   await remove("patternExceptions", exceptionId);
 }
 
 export async function saveSchedule(item: Schedule): Promise<void> {
+  if (isSupabaseEnabled()) {
+    await supabaseUpsert("schedules", item, "id");
+    return;
+  }
   await put("schedules", item);
 }
 
 export async function moveScheduleToTrash(scheduleId: string): Promise<void> {
+  if (isSupabaseEnabled()) {
+    const client = getSupabaseClient();
+    const { data: schedule, error: scheduleError } = await client
+      .from("schedules")
+      .select("*")
+      .eq("id", scheduleId)
+      .maybeSingle();
+
+    if (scheduleError) {
+      throw new Error(scheduleError.message);
+    }
+    if (!schedule) {
+      throw new Error("삭제할 일정을 찾지 못했습니다.");
+    }
+
+    const now = new Date();
+    const purgeAt = new Date(now);
+    purgeAt.setDate(purgeAt.getDate() + 7);
+
+    const trashItem: TrashItem = {
+      id: `trash-${schedule.id}-${now.getTime()}`,
+      entityType: "schedule",
+      entityId: schedule.id,
+      payload: {
+        ...schedule,
+        deletedAt: now.toISOString(),
+      },
+      deletedAt: now.toISOString(),
+      purgeAt: purgeAt.toISOString(),
+    };
+
+    await supabaseUpsert("trash", trashItem, "id");
+    await supabaseDelete("schedules", "id", scheduleId);
+    return;
+  }
+
   const db = await openPlannerDb();
   const tx = db.transaction(["schedules", "trash"], "readwrite");
   const schedulesStore = tx.objectStore("schedules");
@@ -200,6 +338,33 @@ export async function moveScheduleToTrash(scheduleId: string): Promise<void> {
 }
 
 export async function restoreScheduleFromTrash(trashId: string): Promise<void> {
+  if (isSupabaseEnabled()) {
+    const client = getSupabaseClient();
+    const { data: trashItem, error: trashError } = await client
+      .from("trash")
+      .select("*")
+      .eq("id", trashId)
+      .maybeSingle();
+
+    if (trashError) {
+      throw new Error(trashError.message);
+    }
+    if (!trashItem) {
+      throw new Error("복구할 휴지통 항목을 찾지 못했습니다.");
+    }
+
+    const restored: Schedule = {
+      ...trashItem.payload,
+      deletedAt: undefined,
+      source: "user",
+      updatedAt: new Date().toISOString(),
+    };
+
+    await supabaseUpsert("schedules", restored, "id");
+    await supabaseDelete("trash", "id", trashId);
+    return;
+  }
+
   const db = await openPlannerDb();
   const tx = db.transaction(["trash", "schedules"], "readwrite");
   const trashStore = tx.objectStore("trash");
@@ -229,10 +394,26 @@ export async function restoreScheduleFromTrash(trashId: string): Promise<void> {
 }
 
 export async function deleteTrashItem(trashId: string): Promise<void> {
+  if (isSupabaseEnabled()) {
+    await supabaseDelete("trash", "id", trashId);
+    return;
+  }
   await remove("trash", trashId);
 }
 
 export async function purgeExpiredTrash(): Promise<void> {
+  if (isSupabaseEnabled()) {
+    const client = getSupabaseClient();
+    const { error } = await client
+      .from("trash")
+      .delete()
+      .lte("purgeAt", new Date().toISOString());
+    if (error) {
+      throw new Error(error.message);
+    }
+    return;
+  }
+
   const db = await openPlannerDb();
   const tx = db.transaction("trash", "readwrite");
   const store = tx.objectStore("trash");
@@ -250,10 +431,43 @@ export async function purgeExpiredTrash(): Promise<void> {
 }
 
 export async function setSetting<T>(key: string, value: T): Promise<void> {
+  if (isSupabaseEnabled()) {
+    await supabaseUpsert("settings", { key, value } satisfies SettingRecord<T>, "key");
+    return;
+  }
   await put("settings", { key, value } satisfies SettingRecord<T>);
 }
 
 export async function replaceAllData(payload: BackupPayload): Promise<void> {
+  if (isSupabaseEnabled()) {
+    await Promise.all([
+      supabaseClear("work_patterns", "id"),
+      supabaseClear("pattern_exceptions", "id"),
+      supabaseClear("schedules", "id"),
+      supabaseClear("trash", "id"),
+      supabaseClear("settings", "key"),
+    ]);
+
+    await Promise.all([
+      payload.workPatterns.length > 0
+        ? supabaseUpsert("work_patterns", payload.workPatterns, "id")
+        : Promise.resolve(),
+      payload.patternExceptions.length > 0
+        ? supabaseUpsert("pattern_exceptions", payload.patternExceptions, "id")
+        : Promise.resolve(),
+      payload.schedules.length > 0
+        ? supabaseUpsert("schedules", payload.schedules, "id")
+        : Promise.resolve(),
+      payload.trash.length > 0
+        ? supabaseUpsert("trash", payload.trash, "id")
+        : Promise.resolve(),
+      payload.settings.length > 0
+        ? supabaseUpsert("settings", payload.settings, "key")
+        : Promise.resolve(),
+    ]);
+    return;
+  }
+
   await Promise.all([
     clear("workPatterns"),
     clear("patternExceptions"),
