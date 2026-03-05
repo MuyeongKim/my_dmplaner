@@ -125,38 +125,6 @@ function SearchIcon({ className = "ui-icon" }: IconProps) {
   );
 }
 
-function TargetIcon({ className = "ui-icon" }: IconProps) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="12" cy="12" r="8" />
-      <circle cx="12" cy="12" r="3" />
-      <line x1="12" y1="2" x2="12" y2="5" />
-      <line x1="12" y1="19" x2="12" y2="22" />
-      <line x1="2" y1="12" x2="5" y2="12" />
-      <line x1="19" y1="12" x2="22" y2="12" />
-    </svg>
-  );
-}
-
-function PlusIcon({ className = "ui-icon" }: IconProps) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  );
-}
-
-function MenuIcon({ className = "ui-icon" }: IconProps) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <line x1="4" y1="7" x2="20" y2="7" />
-      <line x1="4" y1="12" x2="20" y2="12" />
-      <line x1="4" y1="17" x2="20" y2="17" />
-    </svg>
-  );
-}
-
 function ChevronIcon({ className = "ui-icon", direction = "left" }: IconProps & { direction?: "left" | "right" }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -194,8 +162,6 @@ export default function HomePage() {
   const [tab, setTab] = useState<PlannerTab>("month");
   const [currentMonth, setCurrentMonth] = useState(fromDateKey(todayKey));
   const [selectedDate, setSelectedDate] = useState(todayKey);
-
-  const [topMode, setTopMode] = useState<"solution" | "personal" | "work">("personal");
   const [rangeMode, setRangeMode] = useState<"month" | "3day">("month");
 
   const [pattern, setPattern] = useState<WorkPattern | null>(null);
@@ -245,21 +211,6 @@ export default function HomePage() {
       if (active) {
         setCycleItems(active.cycleItems);
         setStartDate(active.startDate);
-      }
-
-      const savedTopMode = settingsMap.get("ui:topMode");
-      if (savedTopMode === "solution" || savedTopMode === "personal" || savedTopMode === "work") {
-        setTopMode(savedTopMode);
-      }
-
-      const savedRangeMode = settingsMap.get("ui:rangeMode");
-      if (savedRangeMode === "month" || savedRangeMode === "3day") {
-        setRangeMode(savedRangeMode);
-      }
-
-      const savedTab = settingsMap.get("ui:tab");
-      if (savedTab === "month" || savedTab === "week" || savedTab === "settings" || savedTab === "memo") {
-        setTab(savedTab);
       }
 
       const savedDate = settingsMap.get("ui:lastDate");
@@ -321,12 +272,6 @@ export default function HomePage() {
       window.removeEventListener("offline", setOffline);
     };
   }, []);
-
-  useEffect(() => {
-    setSetting("ui:topMode", topMode).catch(() => {
-      // no-op
-    });
-  }, [topMode]);
 
   useEffect(() => {
     setSetting("ui:rangeMode", rangeMode).catch(() => {
@@ -722,13 +667,8 @@ export default function HomePage() {
   return (
     <main className="planner-shell">
       <section className="planner-card">
-        <section className="legacy-topbar" aria-label="모드">
-          <div className="legacy-tabs">
-            <button type="button" className={`legacy-tab ${topMode === "solution" ? "active" : ""}`} onClick={() => setTopMode("solution")}>문제해결</button>
-            <button type="button" className={`legacy-tab ${topMode === "personal" ? "active" : ""}`} onClick={() => setTopMode("personal")}>개인용</button>
-            <button type="button" className={`legacy-tab ${topMode === "work" ? "active" : ""}`} onClick={() => setTopMode("work")}>업무용</button>
-            <button type="button" className={`legacy-tab pill ${rangeMode === "3day" ? "active" : ""}`} onClick={() => setRangeMode((prev) => (prev === "month" ? "3day" : "month"))}>3일</button>
-          </div>
+        <section className="titlebar" aria-label="앱 제목">
+          <h1 className="app-title">달무 플래너</h1>
           <button type="button" className="search-icon" aria-label="검색" onClick={() => setShowSearchModal(true)}><SearchIcon /></button>
         </section>
 
@@ -978,27 +918,8 @@ export default function HomePage() {
         )}
       </section>
 
-      <div className="quick-dock" role="toolbar" aria-label="빠른 작업">
-        <button type="button" onClick={() => setShowSearchModal(true)}>
-          <SearchIcon className="dock-icon" />
-          <small>검색</small>
-        </button>
-        <button type="button" onClick={goToday}>
-          <TargetIcon className="dock-icon" />
-          <small>오늘</small>
-        </button>
-        <button type="button" onClick={() => openAddSchedule(selectedDate)}>
-          <PlusIcon className="dock-icon" />
-          <small>등록</small>
-        </button>
-        <button type="button" onClick={() => setTab("settings")}>
-          <MenuIcon className="dock-icon" />
-          <small>설정</small>
-        </button>
-      </div>
-
       <nav className="bottom-tabs">
-  <button type="button" className="meta-tab" onClick={() => setShowSearchModal(true)}>*공지</button>
+  <button type="button" className="meta-tab" onClick={() => setShowSearchModal(true)}>검색</button>
   <button
     type="button"
     className={tab === "month" && rangeMode === "month" ? "active" : ""}
@@ -1041,12 +962,6 @@ export default function HomePage() {
     메모
   </button>
 </nav>
-
-      {tab !== "settings" && pattern && (
-        <button type="button" className="fab" onClick={() => openAddSchedule(selectedDate)} aria-label="일정 추가">
-          <PlusIcon className="fab-icon" />
-        </button>
-      )}
 
       {showScheduleModal && (
         <div className="modal-backdrop" onClick={() => setShowScheduleModal(false)}>
@@ -1208,6 +1123,8 @@ export default function HomePage() {
     </main>
   );
 }
+
+
 
 
 
