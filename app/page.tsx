@@ -43,6 +43,7 @@ import {
 const EVENT_COLORS = ["#2b6cb0", "#0f766e", "#c2410c", "#7e22ce", "#be185d", "#166534"];
 const PATTERN_COLORS = ["#4c6e3b", "#4f86c6", "#ea580c", "#7d8597"];
 const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
+const MEMO_SLOT_COUNT = 5;
 
 type ScheduleForm = {
   id?: string;
@@ -81,6 +82,26 @@ function reverseRecent(items: Schedule[]): Schedule[] {
 
 function isDateKey(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function createEmptyMemoDrafts(): string[] {
+  return Array.from({ length: MEMO_SLOT_COUNT }, () => "");
+}
+
+function getMemoValue(
+  memoMap: Record<string, string>,
+  dateKey: string,
+  index: number,
+): string {
+  const slotKey = `${dateKey}:${index}`;
+  if (typeof memoMap[slotKey] === "string") {
+    return memoMap[slotKey];
+  }
+  // Backward compatibility: legacy single-memo key uses just the date.
+  if (index === 0) {
+    return memoMap[dateKey] ?? "";
+  }
+  return "";
 }
 
 function toDateTimeLocalValue(iso?: string): string {
@@ -205,7 +226,7 @@ export default function HomePage() {
     enabled: true,
   });
 
-  const [memoDraft, setMemoDraft] = useState("");
+  const [memoDrafts, setMemoDrafts] = useState<string[]>(createEmptyMemoDrafts);
   const [searchQuery, setSearchQuery] = useState("");
   const [holidayMap, setHolidayMap] = useState<Record<string, string>>({});
   const [tempHolidayDates, setTempHolidayDates] = useState<string[]>([]);
@@ -278,6 +299,7 @@ export default function HomePage() {
         setSchedules([]);
         setTrash([]);
         setMemos({});
+        setMemoDrafts(createEmptyMemoDrafts());
         setError(null);
         setLoading(false);
         return;
@@ -335,7 +357,11 @@ export default function HomePage() {
   }, [refresh, supabaseEnabled]);
 
   useEffect(() => {
-    setMemoDraft(memos[selectedDate] ?? "");
+    setMemoDrafts(
+      Array.from({ length: MEMO_SLOT_COUNT }, (_, index) =>
+        getMemoValue(memos, selectedDate, index),
+      ),
+    );
   }, [memos, selectedDate]);
 
   useEffect(() => {
@@ -651,11 +677,27 @@ export default function HomePage() {
     }
   };
 
+  const updateMemoDraft = (index: number, value: string) => {
+    setMemoDrafts((prev) => prev.map((item, i) => (i === index ? value : item)));
+  };
+
   const saveMemo = async () => {
     try {
       setSavingMemo(true);
-      await setSetting(`memo:${selectedDate}`, memoDraft);
-      setMemos((prev) => ({ ...prev, [selectedDate]: memoDraft }));
+      const writes = memoDrafts.map((memoText, index) =>
+        setSetting(`memo:${selectedDate}:${index}`, memoText),
+      );
+      // Keep legacy key synced to slot 1 for older data compatibility.
+      writes.push(setSetting(`memo:${selectedDate}`, memoDrafts[0] ?? ""));
+      await Promise.all(writes);
+
+      setMemos((prev) => {
+        const next = { ...prev, [selectedDate]: memoDrafts[0] ?? "" };
+        for (let index = 0; index < MEMO_SLOT_COUNT; index += 1) {
+          next[`${selectedDate}:${index}`] = memoDrafts[index] ?? "";
+        }
+        return next;
+      });
       setError(null);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "메모 저장에 실패했습니다.");
@@ -1195,12 +1237,19 @@ export default function HomePage() {
         {tab === "memo" && (
           <section className="panel stack">
             <h3>{getDateHeadline(selectedDate)} 메모</h3>
-            <textarea
-              value={memoDraft}
-              onChange={(event) => setMemoDraft(event.target.value)}
-              rows={8}
-              placeholder="필요한 메모를 남겨두세요"
-            />
+            <div className="stack">
+              {memoDrafts.map((memoText, index) => (
+                <label key={`memo-slot-${index}`} className="field">
+                  <span>메모 {index + 1}</span>
+                  <textarea
+                    value={memoText}
+                    onChange={(event) => updateMemoDraft(index, event.target.value)}
+                    rows={3}
+                    placeholder={`메모 ${index + 1} 내용을 입력하세요`}
+                  />
+                </label>
+              ))}
+            </div>
             <button type="button" onClick={saveMemo} disabled={savingMemo}>
               {savingMemo ? "저장 중..." : "메모 저장"}
             </button>
