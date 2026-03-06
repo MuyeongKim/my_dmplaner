@@ -163,6 +163,8 @@ export default function HomePage() {
   const [isOnline, setIsOnline] = useState(true);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("unsupported");
   const [savingPattern, setSavingPattern] = useState(false);
+  const [savingMemo, setSavingMemo] = useState(false);
+  const [savingTempHolidays, setSavingTempHolidays] = useState(false);
   const [requiresSignIn, setRequiresSignIn] = useState(false);
   const [authUserEmail, setAuthUserEmail] = useState<string | null>(null);
   const [authEmail, setAuthEmail] = useState("");
@@ -650,8 +652,16 @@ export default function HomePage() {
   };
 
   const saveMemo = async () => {
-    await setSetting(`memo:${selectedDate}`, memoDraft);
-    setMemos((prev) => ({ ...prev, [selectedDate]: memoDraft }));
+    try {
+      setSavingMemo(true);
+      await setSetting(`memo:${selectedDate}`, memoDraft);
+      setMemos((prev) => ({ ...prev, [selectedDate]: memoDraft }));
+      setError(null);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "메모 저장에 실패했습니다.");
+    } finally {
+      setSavingMemo(false);
+    }
   };
 
   const saveTempHolidays = async () => {
@@ -660,10 +670,17 @@ export default function HomePage() {
       setError("임시공휴일 형식은 YYYY-MM-DD, YYYY-MM-DD 형태로 입력해주세요.");
       return;
     }
-    await setSetting("holiday:tempDates", normalized);
-    setTempHolidayDates(normalized);
-    setTempHolidayInput(normalized.join(", "));
-    setError(null);
+    try {
+      setSavingTempHolidays(true);
+      await setSetting("holiday:tempDates", normalized);
+      setTempHolidayDates(normalized);
+      setTempHolidayInput(normalized.join(", "));
+      setError(null);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "임시공휴일 저장에 실패했습니다.");
+    } finally {
+      setSavingTempHolidays(false);
+    }
   };
 
   const moveCycle = (index: number, direction: -1 | 1) => {
@@ -1152,7 +1169,9 @@ export default function HomePage() {
               />
             </label>
             <div className="inline-actions">
-              <button type="button" onClick={saveTempHolidays}>임시공휴일 저장</button>
+              <button type="button" onClick={saveTempHolidays} disabled={savingTempHolidays}>
+                {savingTempHolidays ? "저장 중..." : "임시공휴일 저장"}
+              </button>
             </div>
             <p className="empty">일요일과 임시공휴일은 빨간색, 토요일은 파란색으로 표시됩니다.</p>
 
@@ -1182,7 +1201,9 @@ export default function HomePage() {
               rows={8}
               placeholder="필요한 메모를 남겨두세요"
             />
-            <button type="button" onClick={saveMemo}>메모 저장</button>
+            <button type="button" onClick={saveMemo} disabled={savingMemo}>
+              {savingMemo ? "저장 중..." : "메모 저장"}
+            </button>
           </section>
         )}
 
