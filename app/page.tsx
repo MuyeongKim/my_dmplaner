@@ -162,6 +162,7 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("unsupported");
+  const [savingPattern, setSavingPattern] = useState(false);
   const [requiresSignIn, setRequiresSignIn] = useState(false);
   const [authUserEmail, setAuthUserEmail] = useState<string | null>(null);
   const [authEmail, setAuthEmail] = useState("");
@@ -487,10 +488,21 @@ export default function HomePage() {
       isActive: true,
     };
 
-    await saveWorkPattern(updated);
-    await setSetting("app:configured", true);
-    setPattern(updated);
-    await refresh();
+    try {
+      setSavingPattern(true);
+      await saveWorkPattern(updated);
+      // 설정 저장 실패가 패턴 저장 자체를 막지 않도록 분리한다.
+      await setSetting("app:configured", true).catch(() => {
+        // no-op
+      });
+      setPattern(updated);
+      await refresh();
+      setError(null);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "근무패턴 저장에 실패했습니다.");
+    } finally {
+      setSavingPattern(false);
+    }
   };
 
   const openAddSchedule = (date = selectedDate) => {
@@ -986,7 +998,7 @@ export default function HomePage() {
 
               <div className="inline-actions">
                 <button type="button" onClick={addCycleItem}>항목 추가</button>
-                <button type="submit">패턴 저장</button>
+                <button type="submit" disabled={savingPattern}>{savingPattern ? "저장 중..." : "패턴 저장"}</button>
               </div>
             </form>
           </section>
