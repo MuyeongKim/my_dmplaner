@@ -37,11 +37,11 @@ interface PlannerDataSnapshot {
 
 let supabaseClient: SupabaseClient | null = null;
 
-function isSupabaseEnabled(): boolean {
+export function isSupabaseEnabled(): boolean {
   return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 }
 
-function getSupabaseClient(): SupabaseClient {
+export function getSupabaseClient(): SupabaseClient {
   if (!isSupabaseEnabled()) {
     throw new Error("Supabase 설정이 없습니다.");
   }

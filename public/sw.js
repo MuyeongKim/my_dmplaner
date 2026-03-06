@@ -1,5 +1,14 @@
-const CACHE_NAME = "easy-planner-cache-v1";
+const CACHE_NAME = "easy-planner-cache-v2";
 const ASSETS = ["/", "/manifest.webmanifest", "/favicon.ico"];
+const OFFLINE_FALLBACK_URL = "/";
+
+function isCacheableResponse(response) {
+  return Boolean(
+    response &&
+      response.status === 200 &&
+      (response.type === "basic" || response.type === "default"),
+  );
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -26,21 +35,33 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin !== self.location.origin) {
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) {
-        return cached;
-      }
-      return fetch(event.request)
-        .then((response) => {
-          if (!response || response.status !== 200 || response.type !== "basic") {
-            return response;
+    (async () => {
+      try {
+        const networkResponse = await fetch(event.request);
+        if (isCacheableResponse(networkResponse)) {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(event.request, networkResponse.clone());
+        }
+        return networkResponse;
+      } catch {
+        const cached = await caches.match(event.request);
+        if (cached) {
+          return cached;
+        }
+        if (event.request.mode === "navigate") {
+          const fallback = await caches.match(OFFLINE_FALLBACK_URL);
+          if (fallback) {
+            return fallback;
           }
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
-          return response;
-        })
-        .catch(() => caches.match("/"));
-    }),
+        }
+        throw new Error("Network request failed and no cache fallback is available.");
+      }
+    })(),
   );
 });

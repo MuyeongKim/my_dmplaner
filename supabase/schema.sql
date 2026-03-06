@@ -53,7 +53,7 @@ drop policy if exists "mvp_all_work_patterns" on public.work_patterns;
 create policy "mvp_all_work_patterns"
 on public.work_patterns
 for all
-to anon, authenticated
+to authenticated
 using (true)
 with check (true);
 
@@ -61,7 +61,7 @@ drop policy if exists "mvp_all_pattern_exceptions" on public.pattern_exceptions;
 create policy "mvp_all_pattern_exceptions"
 on public.pattern_exceptions
 for all
-to anon, authenticated
+to authenticated
 using (true)
 with check (true);
 
@@ -69,7 +69,7 @@ drop policy if exists "mvp_all_schedules" on public.schedules;
 create policy "mvp_all_schedules"
 on public.schedules
 for all
-to anon, authenticated
+to authenticated
 using (true)
 with check (true);
 
@@ -77,7 +77,7 @@ drop policy if exists "mvp_all_trash" on public.trash;
 create policy "mvp_all_trash"
 on public.trash
 for all
-to anon, authenticated
+to authenticated
 using (true)
 with check (true);
 
@@ -85,6 +85,6 @@ drop policy if exists "mvp_all_settings" on public.settings;
 create policy "mvp_all_settings"
 on public.settings
 for all
-to anon, authenticated
+to authenticated
 using (true)
 with check (true);

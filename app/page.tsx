@@ -18,6 +18,8 @@ import {
   deleteException,
   deleteTrashItem,
   exportBackupPayload,
+  getSupabaseClient,
+  isSupabaseEnabled,
   loadSnapshot,
   moveScheduleToTrash,
   purgeExpiredTrash,
@@ -154,11 +156,17 @@ function ChevronsIcon({ className = "ui-icon", direction = "left" }: IconProps &
 
 export default function HomePage() {
   const todayKey = createTodayKey();
+  const supabaseEnabled = isSupabaseEnabled();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("unsupported");
+  const [requiresSignIn, setRequiresSignIn] = useState(false);
+  const [authUserEmail, setAuthUserEmail] = useState<string | null>(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authSubmitting, setAuthSubmitting] = useState(false);
 
   const [tab, setTab] = useState<PlannerTab>("month");
   const [currentMonth, setCurrentMonth] = useState(fromDateKey(todayKey));
@@ -249,8 +257,79 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    refresh(true);
-  }, [refresh]);
+    let active = true;
+
+    const applySession = async (
+      session: { user?: { email?: string | null } } | null,
+      shouldRefresh: boolean,
+    ) => {
+      if (!active) {
+        return;
+      }
+
+      if (!session) {
+        setRequiresSignIn(true);
+        setAuthUserEmail(null);
+        setPattern(null);
+        setExceptions([]);
+        setSchedules([]);
+        setTrash([]);
+        setMemos({});
+        setError(null);
+        setLoading(false);
+        return;
+      }
+
+      setRequiresSignIn(false);
+      setAuthUserEmail(session.user?.email ?? null);
+      if (shouldRefresh) {
+        await refresh(true);
+      }
+    };
+
+    if (!supabaseEnabled) {
+      void refresh(true);
+      return () => {
+        active = false;
+      };
+    }
+
+    const client = getSupabaseClient();
+
+    const init = async () => {
+      setLoading(true);
+      const { data, error: sessionError } = await client.auth.getSession();
+      if (!active) {
+        return;
+      }
+      if (sessionError) {
+        setError(sessionError.message);
+        setLoading(false);
+        return;
+      }
+
+      await applySession(data.session, true);
+    };
+
+    void init();
+
+    const {
+      data: { subscription },
+    } = client.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") {
+        void applySession(null, false);
+        return;
+      }
+      if (event === "SIGNED_IN") {
+        void applySession(session, true);
+      }
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, [refresh, supabaseEnabled]);
 
   useEffect(() => {
     setMemoDraft(memos[selectedDate] ?? "");
@@ -262,9 +341,14 @@ export default function HomePage() {
     }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {
-        // no-op
-      });
+      navigator.serviceWorker
+        .register("/sw.js")
+        .then((registration) => registration.update().catch(() => {
+          // no-op
+        }))
+        .catch(() => {
+          // no-op
+        });
     }
 
     if ("Notification" in window) {
@@ -286,23 +370,34 @@ export default function HomePage() {
     };
   }, []);
 
+  const canPersistSettings = !supabaseEnabled || !requiresSignIn;
+
   useEffect(() => {
+    if (!canPersistSettings) {
+      return;
+    }
     setSetting("ui:rangeMode", rangeMode).catch(() => {
       // no-op
     });
-  }, [rangeMode]);
+  }, [canPersistSettings, rangeMode]);
 
   useEffect(() => {
+    if (!canPersistSettings) {
+      return;
+    }
     setSetting("ui:tab", tab).catch(() => {
       // no-op
     });
-  }, [tab]);
+  }, [canPersistSettings, tab]);
 
   useEffect(() => {
+    if (!canPersistSettings) {
+      return;
+    }
     setSetting("ui:lastDate", selectedDate).catch(() => {
       // no-op
     });
-  }, [selectedDate]);
+  }, [canPersistSettings, selectedDate]);
 
   const monthCells = useMemo(() => buildMonthGrid(currentMonth), [currentMonth]);
   const weekDates = useMemo(() => buildWeekRange(selectedDate), [selectedDate]);
@@ -347,6 +442,13 @@ export default function HomePage() {
   useEffect(() => {
     let mounted = true;
 
+    if (requiresSignIn) {
+      setHolidayMap({});
+      return () => {
+        mounted = false;
+      };
+    }
+
     const loadHolidays = async () => {
       try {
         const monthHolidayMap = await loadHolidayMap(monthCells.map((cell) => cell.date));
@@ -368,7 +470,7 @@ export default function HomePage() {
     return () => {
       mounted = false;
     };
-  }, [monthCells, tempHolidayDates]);
+  }, [monthCells, tempHolidayDates, requiresSignIn]);
 
   const savePatternConfig = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -631,7 +733,50 @@ export default function HomePage() {
     setError(null);
   };
 
+  const submitSignIn = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const email = authEmail.trim();
+    if (!email || !authPassword) {
+      setError("이메일과 비밀번호를 입력해주세요.");
+      return;
+    }
+
+    try {
+      setAuthSubmitting(true);
+      const client = getSupabaseClient();
+      const { error: signInError } = await client.auth.signInWithPassword({
+        email,
+        password: authPassword,
+      });
+      if (signInError) {
+        throw signInError;
+      }
+      setError(null);
+      setAuthPassword("");
+    } catch (signInError) {
+      setError(signInError instanceof Error ? signInError.message : "로그인에 실패했습니다.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const signOutSupabase = async () => {
+    if (!supabaseEnabled) {
+      return;
+    }
+    const client = getSupabaseClient();
+    const { error: signOutError } = await client.auth.signOut();
+    if (signOutError) {
+      setError(signOutError.message);
+      return;
+    }
+    setError(null);
+  };
+
   useEffect(() => {
+    if (requiresSignIn) {
+      return;
+    }
     if (typeof window === "undefined" || !("Notification" in window)) {
       return;
     }
@@ -674,9 +819,12 @@ export default function HomePage() {
     }, 30000);
 
     return () => window.clearInterval(timer);
-  }, [schedules, refresh]);
+  }, [schedules, refresh, requiresSignIn]);
 
   useEffect(() => {
+    if (requiresSignIn) {
+      return;
+    }
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable='true']")) {
@@ -710,10 +858,49 @@ export default function HomePage() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedDate]);
+  }, [selectedDate, requiresSignIn]);
 
   if (loading) {
     return <main className="loading-screen">불러오는 중...</main>;
+  }
+
+  if (requiresSignIn) {
+    return (
+      <main className="planner-shell">
+        <section className="planner-card">
+          <section className="panel stack">
+            <h2>Supabase 로그인</h2>
+            <p className="empty">단일 사용자 모드에서는 본인 계정으로 로그인한 뒤 플래너를 사용합니다.</p>
+            {error && <p className="error-banner">{error}</p>}
+            <form className="stack" onSubmit={submitSignIn}>
+              <label className="field">
+                <span>이메일</span>
+                <input
+                  type="email"
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  autoComplete="username"
+                  required
+                />
+              </label>
+              <label className="field">
+                <span>비밀번호</span>
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  autoComplete="current-password"
+                  required
+                />
+              </label>
+              <button type="submit" disabled={authSubmitting}>
+                {authSubmitting ? "로그인 중..." : "로그인"}
+              </button>
+            </form>
+          </section>
+        </section>
+      </main>
+    );
   }
 
   return (
@@ -909,6 +1096,20 @@ export default function HomePage() {
 
         {tab === "settings" && (
           <section className="panel stack">
+            {supabaseEnabled && (
+              <>
+                <h3>계정</h3>
+                <div className="notification-panel">
+                  <p>
+                    로그인 계정: <strong>{authUserEmail ?? "알 수 없음"}</strong>
+                  </p>
+                  <div className="inline-actions">
+                    <button type="button" onClick={signOutSupabase}>로그아웃</button>
+                  </div>
+                </div>
+              </>
+            )}
+
             <h3>데이터 관리</h3>
             <div className="inline-actions">
               <button type="button" onClick={exportBackup}>JSON 내보내기</button>
